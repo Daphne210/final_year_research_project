@@ -1,41 +1,110 @@
-from flask import Flask, request, jsonify
-import xgboost as xgb
-import numpy as np
+from flask import Flask, request, jsonify, render_template_string
 import pandas as pd
 import joblib
 
 app = Flask(__name__)
 
-# Load the trained model
-model = joblib.load("xgb_baseline_model.pkl")  # update with your actual model file path
+model = joblib.load("xgb_baseline_model.pkl")
 
-# Define expected features
 expected_features = [
-    "age", "gender", "bacteria", "urine_ph", "prior_antibiotic_use",  # example features
-    # Add all features your model was trained on
-    # test comments image
+    "age", "gender", "bacteria", "urine_ph", "prior_antibiotic_use"
 ]
 
-@app.route('/', methods=['GET'])
-def home():
-    return "🧪 AMR Prediction API is running. Use POST /predict with JSON input.", 200
+UPLOAD_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AMR Prediction - Upload CSV</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; }
+    h2 { color: #333; }
+    .container { max-width: 600px; }
+    .button { padding: 10px 15px; margin-top: 10px; }
+    #results { margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🧪 AMR Prediction - Upload CSV</h2>
+    <form id="upload-form">
+      <input type="file" id="csv-file" name="file" accept=".csv" required>
+      <br><br>
+      <button type="submit" class="button">Make Predictions</button>
+    </form>
 
-@app.route('/predict', methods=['POST'])
-def predict():
+    <div id="results"></div>
+  </div>
+
+  <script>
+    document.getElementById("upload-form").addEventListener("submit", async function(event) {
+      event.preventDefault();
+      const fileInput = document.getElementById("csv-file");
+      const file = fileInput.files[0];
+
+      if (!file) {
+        alert("Please select a CSV file.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      const text = await response.text();
+      document.getElementById("results").innerHTML = response.ok ? text : `<pre>${text}</pre>`;
+    });
+  </script>
+</body>
+</html>
+"""
+
+@app.route("/", methods=["GET"])
+def index():
+    return render_template_string(UPLOAD_HTML)
+
+@app.route("/upload", methods=["POST"])
+def upload_csv():
+    if "file" not in request.files:
+        return "No file uploaded", 400
+
+    file = request.files["file"]
+    try:
+        df = pd.read_csv(file)
+
+        missing = [f for f in expected_features if f not in df.columns]
+        if missing:
+            return jsonify({"error": "Missing columns", "missing": missing}), 400
+
+        df = df[expected_features]
+        predictions = model.predict(df)
+        probabilities = model.predict_proba(df).tolist()
+
+        df["prediction"] = predictions
+        df["probability_0"] = [p[0] for p in probabilities]
+        df["probability_1"] = [p[1] for p in probabilities]
+
+        return df.to_html(classes="table table-striped", index=False)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/predict", methods=["POST"])
+def predict_json():
     try:
         input_data = request.get_json(force=True)
 
-        # Validate and extract features
         if not all(feature in input_data for feature in expected_features):
             return jsonify({
                 "error": "Missing required features",
                 "expected_features": expected_features
             }), 400
 
-        # Create DataFrame for model input
         input_df = pd.DataFrame([input_data])[expected_features]
-
-        # Make prediction
         prediction = model.predict(input_df)
         probability = model.predict_proba(input_df).tolist()
 
@@ -47,5 +116,5 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
