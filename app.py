@@ -16,6 +16,10 @@ expected_features = [
     # test comments image
 ]
 
+@app.route('/', methods=['GET'])
+def home():
+    return "🧪 AMR Prediction API is running. Use POST /predict with JSON input.", 200
+
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
