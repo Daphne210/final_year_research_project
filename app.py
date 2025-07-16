@@ -13,7 +13,7 @@ model = joblib.load("xgb_baseline_model.pkl")  # update with your actual model f
 expected_features = [
     "age", "gender", "bacteria", "urine_ph", "prior_antibiotic_use",  # example features
     # Add all features your model was trained on
-    # test comment
+    # test comments
 ]
 
 @app.route('/predict', methods=['POST'])
