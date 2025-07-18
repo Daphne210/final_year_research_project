@@ -4,12 +4,11 @@ import joblib
 
 app = Flask(__name__)
 
+# Load model and expected features
 model = joblib.load("xgb_baseline_model.pkl")
+expected_features = joblib.load("xgb_expected_features.pkl")  # Must be a list of 91 features
 
-expected_features = [
-    "age", "gender", "bacteria", "urine_ph", "prior_antibiotic_use"
-]
-
+# HTML for file upload UI
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
