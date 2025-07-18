@@ -5,8 +5,8 @@ import joblib
 app = Flask(__name__)
 
 # Load all antibiotic models and expected feature list
-models = joblib.load("xgb_baseline_model.pkl") 
-expected_features = joblib.load("xgb_expected_features.pkl") 
+models = joblib.load("xgb_baseline_model.pkl")  # dict with 4 models
+expected_features = joblib.load("xgb_expected_features.pkl")  # list of 91 features
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
@@ -24,7 +24,7 @@ UPLOAD_HTML = """
 </head>
 <body>
   <div class="container">
-    <h2> AMR Prediction - Upload CSV</h2>
+    <h2>🧪 AMR Prediction - Upload CSV</h2>
     <form id="upload-form">
       <input type="file" id="csv-file" name="file" accept=".csv" required>
       <br><br>
@@ -74,10 +74,16 @@ def upload_csv():
     try:
         df = pd.read_csv(file)
 
+        # Strip whitespace and drop extra columns
+        df.columns = df.columns.str.strip()
+        df = df[[col for col in df.columns if col in expected_features]]
+
+        # Check again for missing features
         missing = [f for f in expected_features if f not in df.columns]
         if missing:
             return jsonify({"error": "Missing columns", "missing": missing}), 400
 
+        # Reorder columns exactly
         df = df[expected_features]
 
         # Predict for each antibiotic using its respective model
