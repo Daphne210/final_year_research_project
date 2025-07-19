@@ -74,23 +74,27 @@ def upload_csv():
     try:
         df = pd.read_csv(file)
 
-        # Strip whitespace and drop extra columns
+        # Clean column names
         df.columns = df.columns.str.strip()
+
+        # Drop extra columns and keep only expected
         df = df[[col for col in df.columns if col in expected_features]]
 
-        # Check again for missing features
+        # Check for missing columns
         missing = [f for f in expected_features if f not in df.columns]
         if missing:
             return jsonify({"error": "Missing columns", "missing": missing}), 400
 
-        # Reorder columns exactly
+        # Reorder columns exactly as expected
         df = df[expected_features]
 
-        # Predict for each antibiotic using its respective model
-        for label, model in models.items():
-            df[f"{label}_prediction"] = model.predict(df)
+        # 🔧 FIX: Don't modify df during prediction — use separate result container
+        results = df.copy()
 
-        return df.to_html(classes="table table-striped", index=False)
+        for label, model in models.items():
+            results[f"{label}_prediction"] = model.predict(df)
+
+        return results.to_html(classes="table table-striped", index=False)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
