@@ -4,10 +4,11 @@ import joblib
 
 app = Flask(__name__)
 
-# Load all antibiotic models and expected feature list
-models = joblib.load("best_xgb_models.pkl") 
-expected_features = joblib.load("xgb_expected_features.pkl") 
+# Load models and expected features
+models = joblib.load("best_xgb_models.pkl")
+expected_features = joblib.load("xgb_expected_features.pkl")
 
+# Simple upload UI
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -15,11 +16,13 @@ UPLOAD_HTML = """
   <meta charset="UTF-8">
   <title>AMR Prediction - Upload CSV</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 30px; }
+    body { font-family: Arial, sans-serif; margin: 30px; background-color: #f9f9f9; }
     h2 { color: #333; }
     .container { max-width: 600px; }
     .button { padding: 10px 15px; margin-top: 10px; }
     #results { margin-top: 30px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 10px; text-align: center; border: 1px solid #ccc; }
   </style>
 </head>
 <body>
@@ -73,28 +76,55 @@ def upload_csv():
     file = request.files["file"]
     try:
         df = pd.read_csv(file)
-
-        # Clean column names
         df.columns = df.columns.str.strip()
-
-        # Drop extra columns and keep only expected
         df = df[[col for col in df.columns if col in expected_features]]
-
-        # Check for missing columns
         missing = [f for f in expected_features if f not in df.columns]
         if missing:
             return jsonify({"error": "Missing columns", "missing": missing}), 400
-
-        # Reorder columns exactly as expected
         df = df[expected_features]
 
-        # 🔧 FIX: Don't modify df during prediction — use separate result container
-        results = df.copy()
+        predictions = {}
+        probabilities = {}
 
         for label, model in models.items():
-            results[f"{label}_prediction"] = model.predict(df)
+            predictions[label] = int(model.predict(df)[0])
+            probabilities[label] = float(model.predict_proba(df)[0][1])  # prob of resistant class (1)
 
-        return results.to_html(classes="table table-striped", index=False)
+        # Generate interpretation summary
+        resistant = [ab for ab, pred in predictions.items() if pred == 1]
+        if resistant:
+            summary = f"⚠️ Patient is likely resistant to: <strong>{', '.join(resistant)}</strong>."
+        else:
+            summary = "✅ No resistance detected. All antibiotics are likely effective."
+
+        # Prediction table with color
+        pred_html = "<h3>Prediction Results</h3><table><tr>"
+        for ab in predictions:
+            pred_html += f"<th>{ab}</th>"
+        pred_html += "</tr><tr>"
+        for ab, pred in predictions.items():
+            color = "#e74c3c" if pred == 1 else "#2ecc71"
+            label = "Resistant" if pred == 1 else "Susceptible"
+            pred_html += f"<td style='background-color:{color};color:white;font-weight:bold'>{label}</td>"
+        pred_html += "</tr></table>"
+
+        # Probability display
+        prob_html = "<h3>Prediction Probabilities</h3><ul>"
+        if resistant:
+            for ab in resistant:
+                prob_html += f"<li><strong>{ab}</strong>: {probabilities[ab]*100:.2f}%</li>"
+        else:
+            for ab, prob in probabilities.items():
+                prob_html += f"<li><strong>{ab}</strong>: {prob*100:.2f}%</li>"
+        prob_html += "</ul>"
+
+        return f"""
+            <div style='font-family:Arial'>
+                {pred_html}
+                <p style='font-size:16px;margin-top:20px'>{summary}</p>
+                {prob_html}
+            </div>
+        """
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -103,7 +133,6 @@ def upload_csv():
 def predict_json():
     try:
         input_data = request.get_json(force=True)
-
         if not all(feature in input_data for feature in expected_features):
             return jsonify({
                 "error": "Missing required features",
