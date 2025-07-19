@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template_string
 import pandas as pd
 import joblib
+import shap
 
 app = Flask(__name__)
 
@@ -8,7 +9,6 @@ app = Flask(__name__)
 models = joblib.load("best_xgb_models.pkl")
 expected_features = joblib.load("xgb_expected_features.pkl")
 
-# Simple upload UI
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -85,19 +85,35 @@ def upload_csv():
 
         predictions = {}
         probabilities = {}
+        shap_sections = []
 
         for label, model in models.items():
             predictions[label] = int(model.predict(df)[0])
-            probabilities[label] = float(model.predict_proba(df)[0][1])  # prob of resistant class (1)
+            probabilities[label] = float(model.predict_proba(df)[0][1])
 
-        # Generate interpretation summary
+            if predictions[label] == 1:
+                explainer = shap.Explainer(model)
+                shap_values = explainer(df)
+
+                top_shap_df = pd.DataFrame({
+                    "feature": df.columns,
+                    "shap_value": shap_values.values[0]
+                }).sort_values(by="shap_value", key=abs, ascending=False).head(5)
+
+                html_block = f"<h3>Top 5 Features Contributing to {label} Resistance</h3><ol>"
+                for _, row in top_shap_df.iterrows():
+                    html_block += f"<li><strong>{row['feature']}</strong>: {row['shap_value']:.4f}</li>"
+                html_block += "</ol>"
+
+                shap_sections.append(html_block)
+
+        # Build summary and prediction tables
         resistant = [ab for ab, pred in predictions.items() if pred == 1]
         if resistant:
             summary = f"⚠️ Patient is likely resistant to: <strong>{', '.join(resistant)}</strong>."
         else:
             summary = "✅ No resistance detected. All antibiotics are likely effective."
 
-        # Prediction table with color
         pred_html = "<h3>Prediction Results</h3><table><tr>"
         for ab in predictions:
             pred_html += f"<th>{ab}</th>"
@@ -108,7 +124,6 @@ def upload_csv():
             pred_html += f"<td style='background-color:{color};color:white;font-weight:bold'>{label}</td>"
         pred_html += "</tr></table>"
 
-        # Probability display
         prob_html = "<h3>Prediction Probabilities</h3><ul>"
         if resistant:
             for ab in resistant:
@@ -118,11 +133,14 @@ def upload_csv():
                 prob_html += f"<li><strong>{ab}</strong>: {prob*100:.2f}%</li>"
         prob_html += "</ul>"
 
+        shap_html = "".join(shap_sections)
+
         return f"""
             <div style='font-family:Arial'>
                 {pred_html}
                 <p style='font-size:16px;margin-top:20px'>{summary}</p>
                 {prob_html}
+                {shap_html}
             </div>
         """
 
