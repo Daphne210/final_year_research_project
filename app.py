@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 # Load all antibiotic models and expected feature list
 models = joblib.load("xgb_baseline_model.pkl") 
-expected_features = joblib.load("xgb_expected_features1.pkl") 
+expected_features = joblib.load("xgb_expected_features.pkl") 
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
