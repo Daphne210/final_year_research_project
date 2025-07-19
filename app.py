@@ -1,15 +1,19 @@
-from flask import Flask, request, jsonify, render_template_string
+# app.py (Complete Final Version)
+
+from flask import Flask, request, jsonify, render_template_string, send_file
 import pandas as pd
 import joblib
 import shap
+import matplotlib.pyplot as plt
+import uuid
+import os
+from fpdf import FPDF
 
 app = Flask(__name__)
 
-# Load models and expected features
 models = joblib.load("best_xgb_models.pkl")
 expected_features = joblib.load("xgb_expected_features.pkl")
 
-# Modern UI template
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -30,7 +34,7 @@ UPLOAD_HTML = """
       border-radius: 12px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.08);
       padding: 40px;
-      max-width: 600px;
+      max-width: 700px;
       width: 100%;
     }
     h2 {
@@ -42,22 +46,13 @@ UPLOAD_HTML = """
       justify-content: center;
       align-items: center;
       gap: 10px;
-      margin-bottom: 30px;
+      margin-bottom: 20px;
     }
-    input[type="file"] {
-      font-size: 14px;
-    }
-    button {
-      background-color: #007bff;
-      color: white;
-      padding: 10px 20px;
-      font-weight: 600;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .results {
-      margin-top: 30px;
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      justify-items: center;
     }
     .pill {
       display: inline-block;
@@ -65,34 +60,29 @@ UPLOAD_HTML = """
       border-radius: 50px;
       font-weight: 600;
       font-size: 16px;
-      margin: 10px 0;
       color: white;
     }
-    .resistant-pill {
-      background-color: #e74c3c;
-    }
-    .sensitive-pill {
-      background-color: #27ae60;
-    }
-    .ab-label {
-      font-weight: bold;
-      margin-right: 10px;
-    }
+    .resistant-pill { background-color: #e74c3c; }
+    .sensitive-pill { background-color: #27ae60; }
+    .ab-label { font-weight: bold; margin-right: 10px; }
     .card {
       background-color: white;
       border-radius: 8px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       padding: 20px;
-      margin-top: 30px;
-      text-align: left;
+      margin-top: 20px;
     }
-    .highlight {
-      font-weight: bold;
-      font-size: 17px;
-      margin-bottom: 10px;
+    .btn-group {
+      text-align: right;
+      margin-top: 20px;
     }
-    ol {
-      padding-left: 20px;
+    .btn-group a {
+      text-decoration: none;
+      padding: 10px 15px;
+      background-color: #007bff;
+      color: white;
+      border-radius: 5px;
+      margin-left: 10px;
     }
   </style>
 </head>
@@ -103,17 +93,12 @@ UPLOAD_HTML = """
       <input type="file" id="csv-file" name="file" accept=".csv" required>
       <button type="submit">Predict</button>
     </form>
-    <div id="results" class="results"></div>
+    <div id="results"></div>
   </div>
-
   <script>
     document.getElementById("upload-form").addEventListener("submit", async function(event) {
       event.preventDefault();
       const file = document.getElementById("csv-file").files[0];
-      if (!file) {
-        alert("Please upload a CSV file.");
-        return;
-      }
       const formData = new FormData();
       formData.append("file", file);
 
@@ -144,53 +129,92 @@ def upload_csv():
         df = pd.read_csv(file)
         df.columns = df.columns.str.strip()
         df = df[[col for col in df.columns if col in expected_features]]
-        missing = [f for f in expected_features if f not in df.columns]
-        if missing:
-            return jsonify({"error": "Missing columns", "missing": missing}), 400
         df = df[expected_features]
 
-        predictions = {}
-        probabilities = {}
-        shap_sections = []
+        predictions, probabilities, shap_sections = {}, {}, []
+        decision_suggestions = []
+        session_id = str(uuid.uuid4())
+        shap_plot_paths = []
 
-        # Predict and gather results
         for label, model in models.items():
-            predictions[label] = int(model.predict(df)[0])
-            probabilities[label] = float(model.predict_proba(df)[0][1])
+            pred = int(model.predict(df)[0])
+            prob = float(model.predict_proba(df)[0][1])
+            predictions[label] = pred
+            probabilities[label] = prob
 
-            # Generate SHAP explanation for resistant cases
-            if predictions[label] == 1:
+            if pred == 1:
                 explainer = shap.Explainer(model)
                 shap_values = explainer(df)
 
-                top_shap_df = pd.DataFrame({
+                shap_df = pd.DataFrame({
                     "feature": df.columns,
                     "shap_value": shap_values.values[0]
                 }).sort_values(by="shap_value", key=abs, ascending=False).head(5)
 
-                html_block = f"<div class='card'><div class='highlight'>{label} - Top 5 Contributing Features</div><ol>"
-                for _, row in top_shap_df.iterrows():
-                    html_block += f"<li>{row['feature']} (Impact: {row['shap_value']:.4f})</li>"
-                html_block += "</ol></div>"
+                suggestion = f"Avoid using {label}. Consider alternative antibiotic."
+                decision_suggestions.append(suggestion)
 
-                shap_sections.append(html_block)
+                # SHAP force plot
+                plt.figure()
+                shap.plots.bar(shap_values[0], show=False)
+                path = f"static/shap_{session_id}_{label}.png"
+                plt.savefig(path, bbox_inches='tight')
+                shap_plot_paths.append((label, path))
 
-        # Generate pill-style output
-        results_html = "<div><h3 style='text-align:left;'>Prediction Results</h3>"
+                explanation = f"<div class='card'><div class='highlight'>{label} - Top 5 Contributing Features</div><ol>"
+                for _, row in shap_df.iterrows():
+                    explanation += f"<li>{row['feature']} (Impact: {row['shap_value']:.4f})</li>"
+                explanation += f"</ol><img src='/{path}' width='100%'></div>"
+                shap_sections.append(explanation)
+
+        # Pills
+        results_html = "<div><h3 style='text-align:left;'>Prediction Results</h3><div class='grid'>"
         for ab in predictions:
-            prob_percent = f"{probabilities[ab]*100:.0f}%"
+            p = f"{probabilities[ab]*100:.0f}%"
             status = "Resistant" if predictions[ab] == 1 else "Sensitive"
             pill_class = "resistant-pill" if predictions[ab] == 1 else "sensitive-pill"
-            results_html += f"<div class='pill {pill_class}'><span class='ab-label'>{ab}</span> {status} ({prob_percent})</div><br>"
-        results_html += "</div>"
+            results_html += f"<div class='pill {pill_class}'><span class='ab-label'>{ab}</span> {status} ({p})</div>"
+        results_html += "</div></div>"
 
-        # Add SHAP summary cards
-        shap_html = "".join(shap_sections)
+        # Decision suggestions
+        suggestion_block = "<div class='card'><strong>Clinical Decision Suggestions:</strong><ul>"
+        if decision_suggestions:
+            for tip in decision_suggestions:
+                suggestion_block += f"<li>{tip}</li>"
+        else:
+            suggestion_block += "<li>All antibiotics predicted sensitive. Proceed with standard treatment.</li>"
+        suggestion_block += "</ul></div>"
 
-        return results_html + shap_html
+        # CSV and PDF download links
+        result_df = pd.DataFrame({
+            "Antibiotic": list(predictions.keys()),
+            "Prediction": ["Resistant" if predictions[k] == 1 else "Sensitive" for k in predictions],
+            "Probability": [round(probabilities[k], 4) for k in probabilities]
+        })
+        csv_path = f"static/report_{session_id}.csv"
+        pdf_path = f"static/report_{session_id}.pdf"
+        result_df.to_csv(csv_path, index=False)
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="AMR Prediction Report", ln=True, align='C')
+        for idx, row in result_df.iterrows():
+            pdf.cell(200, 10, txt=f"{row['Antibiotic']}: {row['Prediction']} ({row['Probability']*100:.1f}%)", ln=True)
+        pdf.output(pdf_path)
+
+        download_links = f"""
+        <div class='btn-group'>
+          <a href='/{csv_path}' download>⬇️ CSV</a>
+          <a href='/{pdf_path}' download>⬇️ PDF</a>
+        </div>
+        """
+
+        return results_html + suggestion_block + ''.join(shap_sections) + download_links
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
+    os.makedirs("static", exist_ok=True)
     app.run(debug=True, host="0.0.0.0", port=5000)
