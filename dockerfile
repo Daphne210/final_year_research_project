@@ -16,7 +16,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY app.py .
 COPY xgb_baseline_model.pkl .
-COPY xgb_expected_features.pkl .
+COPY xgb_expected_features1.pkl .
 
 EXPOSE 5000
 
