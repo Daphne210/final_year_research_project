@@ -5,7 +5,6 @@ import shap
 
 app = Flask(__name__)
 
-# Load models and expected features
 models = joblib.load("best_xgb_models.pkl")
 expected_features = joblib.load("xgb_expected_features.pkl")
 
@@ -14,26 +13,72 @@ UPLOAD_HTML = """
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>AMR Prediction - Upload CSV</title>
+  <title>UTI Antibiotic Resistance Predictor</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 30px; background-color: #f9f9f9; }
-    h2 { color: #333; }
-    .container { max-width: 600px; }
-    .button { padding: 10px 15px; margin-top: 10px; }
-    #results { margin-top: 30px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    th, td { padding: 10px; text-align: center; border: 1px solid #ccc; }
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f6f8;
+      padding: 40px;
+      text-align: center;
+    }
+    .container {
+      max-width: 800px;
+      margin: auto;
+    }
+    .card {
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-top: 30px;
+      text-align: left;
+    }
+    h2 {
+      margin-bottom: 20px;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+    }
+    .resistant {
+      color: #c0392b;
+      font-weight: bold;
+    }
+    .sensitive {
+      color: #27ae60;
+      font-weight: bold;
+    }
+    .highlight {
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    ul {
+      margin-top: 10px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>🧪 AMR Prediction - Upload CSV</h2>
+    <h2>UTI Antibiotic Resistance Predictor</h2>
     <form id="upload-form">
       <input type="file" id="csv-file" name="file" accept=".csv" required>
       <br><br>
-      <button type="submit" class="button">Make Predictions</button>
+      <button type="submit">Predict</button>
     </form>
-
     <div id="results"></div>
   </div>
 
@@ -42,9 +87,8 @@ UPLOAD_HTML = """
       event.preventDefault();
       const fileInput = document.getElementById("csv-file");
       const file = fileInput.files[0];
-
       if (!file) {
-        alert("Please select a CSV file.");
+        alert("Please upload a CSV file.");
         return;
       }
 
@@ -56,8 +100,8 @@ UPLOAD_HTML = """
         body: formData
       });
 
-      const text = await response.text();
-      document.getElementById("results").innerHTML = response.ok ? text : `<pre>${text}</pre>`;
+      const resultHtml = await response.text();
+      document.getElementById("results").innerHTML = resultHtml;
     });
   </script>
 </body>
@@ -100,71 +144,25 @@ def upload_csv():
                     "shap_value": shap_values.values[0]
                 }).sort_values(by="shap_value", key=abs, ascending=False).head(5)
 
-                html_block = f"<h3>Top 5 Features Contributing to {label} Resistance</h3><ol>"
+                html_block = f"<div class='card'><div class='highlight'>{label} - Top 5 Contributing Features</div><ol>"
                 for _, row in top_shap_df.iterrows():
-                    html_block += f"<li><strong>{row['feature']}</strong>: {row['shap_value']:.4f}</li>"
-                html_block += "</ol>"
+                    html_block += f"<li>{row['feature']} (Impact: {row['shap_value']:.4f})</li>"
+                html_block += "</ol></div>"
 
                 shap_sections.append(html_block)
 
-        # Build summary and prediction tables
-        resistant = [ab for ab, pred in predictions.items() if pred == 1]
-        if resistant:
-            summary = f"⚠️ Patient is likely resistant to: <strong>{', '.join(resistant)}</strong>."
-        else:
-            summary = "✅ No resistance detected. All antibiotics are likely effective."
-
-        pred_html = "<h3>Prediction Results</h3><table><tr>"
+        # Format main prediction summary
+        results_html = "<div class='card'><div class='highlight'>Prediction Results</div><table><thead><tr><th>Antibiotic</th><th>Prediction</th><th>Probability</th></tr></thead><tbody>"
         for ab in predictions:
-            pred_html += f"<th>{ab}</th>"
-        pred_html += "</tr><tr>"
-        for ab, pred in predictions.items():
-            color = "#e74c3c" if pred == 1 else "#2ecc71"
-            label = "Resistant" if pred == 1 else "Susceptible"
-            pred_html += f"<td style='background-color:{color};color:white;font-weight:bold'>{label}</td>"
-        pred_html += "</tr></table>"
+            status = "Resistant" if predictions[ab] == 1 else "Sensitive"
+            style = "resistant" if predictions[ab] == 1 else "sensitive"
+            prob = f"{probabilities[ab]:.3f}"
+            results_html += f"<tr><td>{ab}</td><td class='{style}'>{status}</td><td>{prob}</td></tr>"
+        results_html += "</tbody></table></div>"
 
-        prob_html = "<h3>Prediction Probabilities</h3><ul>"
-        if resistant:
-            for ab in resistant:
-                prob_html += f"<li><strong>{ab}</strong>: {probabilities[ab]*100:.2f}%</li>"
-        else:
-            for ab, prob in probabilities.items():
-                prob_html += f"<li><strong>{ab}</strong>: {prob*100:.2f}%</li>"
-        prob_html += "</ul>"
-
+        # Combine and return full result
         shap_html = "".join(shap_sections)
-
-        return f"""
-            <div style='font-family:Arial'>
-                {pred_html}
-                <p style='font-size:16px;margin-top:20px'>{summary}</p>
-                {prob_html}
-                {shap_html}
-            </div>
-        """
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/predict", methods=["POST"])
-def predict_json():
-    try:
-        input_data = request.get_json(force=True)
-        if not all(feature in input_data for feature in expected_features):
-            return jsonify({
-                "error": "Missing required features",
-                "expected_features": expected_features
-            }), 400
-
-        input_df = pd.DataFrame([input_data])[expected_features]
-
-        predictions_dict = {
-            label: int(model.predict(input_df)[0])
-            for label, model in models.items()
-        }
-
-        return jsonify(predictions_dict)
+        return results_html + shap_html
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
