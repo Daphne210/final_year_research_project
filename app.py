@@ -95,7 +95,7 @@ UPLOAD_HTML = """
 </head>
 <body>
   <div class="card">
-    <h1>UTI Antibiotic Resistance Predictor</h1>
+    <h1>UTI Antimicrobial Resistance Predictor</h1>
     <form id="upload-form">
       <input type="file" id="csv-file" name="file" accept=".csv" required>
       <button type="submit" class="predict-button">Predict</button>
@@ -206,7 +206,7 @@ def upload_csv():
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt="UTI Antibiotic Resistance Report", ln=True, align='C')
+        pdf.cell(200, 10, txt="UTI Antimicrobial Resistance Report", ln=True, align='C')
         pdf.ln(10)
         for abx, label, prob in csv_rows:
             pdf.cell(200, 10, txt=f"{abx}: {label} ({prob})", ln=True)
@@ -215,8 +215,8 @@ def upload_csv():
         # Build prediction pills
         pill_html = ""
         for abx in predictions:
-            label = "Resistant" if predictions[abx] == 1 else "Sensitive"
-            color = "resistant" if predictions[abx] == 1 else "sensitive"
+            label = "Resistant" if predictions[abx] == 1 else "susceptible"
+            color = "resistant" if predictions[abx] == 1 else "susceptible"
             percent = f"{probabilities[abx]*100:.0f}%"
             pill_html += f"<div class='pill {color}'>{abx}&nbsp;&nbsp;{label} ({percent})</div>"
 
