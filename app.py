@@ -5,9 +5,11 @@ import shap
 
 app = Flask(__name__)
 
+# Load models and expected features
 models = joblib.load("best_xgb_models.pkl")
 expected_features = joblib.load("xgb_expected_features.pkl")
 
+# Modern UI template
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -16,14 +18,65 @@ UPLOAD_HTML = """
   <title>UTI Antibiotic Resistance Predictor</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background-color: #f4f6f8;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f0f2f5;
+      margin: 0;
       padding: 40px;
-      text-align: center;
+      display: flex;
+      justify-content: center;
     }
     .container {
-      max-width: 800px;
-      margin: auto;
+      background-color: #fff;
+      border-radius: 12px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.08);
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+    }
+    h2 {
+      text-align: center;
+      color: #1a1a1a;
+    }
+    form {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+    input[type="file"] {
+      font-size: 14px;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      padding: 10px 20px;
+      font-weight: 600;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .results {
+      margin-top: 30px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 12px 20px;
+      border-radius: 50px;
+      font-weight: 600;
+      font-size: 16px;
+      margin: 10px 0;
+      color: white;
+    }
+    .resistant-pill {
+      background-color: #e74c3c;
+    }
+    .sensitive-pill {
+      background-color: #27ae60;
+    }
+    .ab-label {
+      font-weight: bold;
+      margin-right: 10px;
     }
     .card {
       background-color: white;
@@ -33,41 +86,13 @@ UPLOAD_HTML = """
       margin-top: 30px;
       text-align: left;
     }
-    h2 {
-      margin-bottom: 20px;
-    }
-    button {
-      background-color: #007bff;
-      color: white;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-    }
-    th, td {
-      padding: 8px 12px;
-      border-bottom: 1px solid #eee;
-      text-align: left;
-    }
-    .resistant {
-      color: #c0392b;
-      font-weight: bold;
-    }
-    .sensitive {
-      color: #27ae60;
-      font-weight: bold;
-    }
     .highlight {
       font-weight: bold;
+      font-size: 17px;
       margin-bottom: 10px;
     }
-    ul {
-      margin-top: 10px;
+    ol {
+      padding-left: 20px;
     }
   </style>
 </head>
@@ -76,22 +101,19 @@ UPLOAD_HTML = """
     <h2>UTI Antibiotic Resistance Predictor</h2>
     <form id="upload-form">
       <input type="file" id="csv-file" name="file" accept=".csv" required>
-      <br><br>
       <button type="submit">Predict</button>
     </form>
-    <div id="results"></div>
+    <div id="results" class="results"></div>
   </div>
 
   <script>
     document.getElementById("upload-form").addEventListener("submit", async function(event) {
       event.preventDefault();
-      const fileInput = document.getElementById("csv-file");
-      const file = fileInput.files[0];
+      const file = document.getElementById("csv-file").files[0];
       if (!file) {
         alert("Please upload a CSV file.");
         return;
       }
-
       const formData = new FormData();
       formData.append("file", file);
 
@@ -100,8 +122,8 @@ UPLOAD_HTML = """
         body: formData
       });
 
-      const resultHtml = await response.text();
-      document.getElementById("results").innerHTML = resultHtml;
+      const html = await response.text();
+      document.getElementById("results").innerHTML = html;
     });
   </script>
 </body>
@@ -131,10 +153,12 @@ def upload_csv():
         probabilities = {}
         shap_sections = []
 
+        # Predict and gather results
         for label, model in models.items():
             predictions[label] = int(model.predict(df)[0])
             probabilities[label] = float(model.predict_proba(df)[0][1])
 
+            # Generate SHAP explanation for resistant cases
             if predictions[label] == 1:
                 explainer = shap.Explainer(model)
                 shap_values = explainer(df)
@@ -151,17 +175,18 @@ def upload_csv():
 
                 shap_sections.append(html_block)
 
-        # Format main prediction summary
-        results_html = "<div class='card'><div class='highlight'>Prediction Results</div><table><thead><tr><th>Antibiotic</th><th>Prediction</th><th>Probability</th></tr></thead><tbody>"
+        # Generate pill-style output
+        results_html = "<div><h3 style='text-align:left;'>Prediction Results</h3>"
         for ab in predictions:
+            prob_percent = f"{probabilities[ab]*100:.0f}%"
             status = "Resistant" if predictions[ab] == 1 else "Sensitive"
-            style = "resistant" if predictions[ab] == 1 else "sensitive"
-            prob = f"{probabilities[ab]:.3f}"
-            results_html += f"<tr><td>{ab}</td><td class='{style}'>{status}</td><td>{prob}</td></tr>"
-        results_html += "</tbody></table></div>"
+            pill_class = "resistant-pill" if predictions[ab] == 1 else "sensitive-pill"
+            results_html += f"<div class='pill {pill_class}'><span class='ab-label'>{ab}</span> {status} ({prob_percent})</div><br>"
+        results_html += "</div>"
 
-        # Combine and return full result
+        # Add SHAP summary cards
         shap_html = "".join(shap_sections)
+
         return results_html + shap_html
 
     except Exception as e:
