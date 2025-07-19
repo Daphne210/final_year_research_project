@@ -69,7 +69,7 @@ UPLOAD_HTML = """
     .resistant {
       background-color: #e74c3c;
     }
-    .sensitive {
+    .susceptible {
       background-color: #2ecc71;
     }
     .section {
@@ -156,7 +156,7 @@ def upload_csv():
             predictions[abx] = pred
             probabilities[abx] = prob
 
-            csv_rows.append([abx, "Resistant" if pred else "Sensitive", f"{prob*100:.2f}%"])
+            csv_rows.append([abx, "Resistant" if pred else "Susceptible", f"{prob*100:.2f}%"])
 
             if pred == 1:
                 explainer = shap.Explainer(model)
